@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>OfflineMaps4Free USA</title>
+    
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    
+    <style>
+        body { margin: 0; padding: 0; background: #ccdce3; font-family: sans-serif; overflow: hidden; }
+
+        /* Branding Header */
+        #header {
+            position: fixed; top: 0; left: 0; width: 100%; height: 55px;
+            background: white; display: flex; align-items: center;
+            padding-left: 15px; z-index: 2000;
+            border-bottom: 3px solid #0055ff;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+
+        .logo { font-weight: 900; font-size: 20px; color: #333; }
+        .logo span { color: #0055ff; }
+
+        /* Map Area */
+        #map { height: 100vh; width: 100vw; background: #ccdce3; z-index: 1; }
+
+        /* Satellite/Street Toggle */
+        #ui-tools {
+            position: fixed; bottom: 25px; left: 50%;
+            transform: translateX(-50%); z-index: 1000;
+            display: flex; gap: 10px;
+            background: rgba(255,255,255,0.9);
+            padding: 8px; border-radius: 50px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.2);
+            border: 1px solid #ccc;
+        }
+
+        .mode-btn {
+            border: none; background: #eee; padding: 10px 18px;
+            border-radius: 25px; font-weight: bold; font-size: 13px;
+            cursor: pointer; transition: 0.2s;
+        }
+        .active-mode { background: #0055ff; color: white; }
+
+        /* Zoom tweaks */
+        .leaflet-top.leaflet-left { margin-top: 65px; }
+    </style>
+</head>
+<body>
+
+    <div id="header">
+        <div class="logo">OfflineMaps<span>4Free</span></div>
+    </div>
+
+    <div id="ui-tools">
+        <button id="btn-street" class="mode-btn active-mode" onclick="setMode('street')">🗺️ Streets</button>
+        <button id="btn-sat" class="mode-btn" onclick="setMode('sat')">🛰️ Satellite</button>
+    </div>
+
+    <div id="map"></div>
+
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script>
+        let map;
+        let streetLayer, satLayer;
+
+        // USA Strict Bounding Box (Continental + Alaska/Hawaii range)
+        const usaBounds = [
+            [5.0, -175.0], // Southwest
+            [72.0, -55.0]  // Northeast
+        ];
+
+        function init() {
+            // Setup Map
+            map = L.map('map', {
+                zoomControl: true,
+                attributionControl: false,
+                maxBounds: usaBounds,
+                maxBoundsViscosity: 1.0, // Hard wall at the borders
+                minZoom: 4
+            }).setView([37.8, -96], 4);
+
+            // Layer 1: High Detail Streets (OSM)
+            streetLayer = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                maxZoom: 19
+            }).addTo(map);
+
+            // Layer 2: High Res Satellite (Esri)
+            satLayer = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+                maxZoom: 18
+            });
+
+            // Automatically focus on user if they are in the USA
+            map.locate({setView: true, maxZoom: 10});
+        }
+
+        function setMode(mode) {
+            const sBtn = document.getElementById('btn-street');
+            const satBtn = document.getElementById('btn-sat');
+
+            if (mode === 'sat') {
+                map.removeLayer(streetLayer);
+                satLayer.addTo(map);
+                satBtn.classList.add('active-mode');
+                sBtn.classList.remove('active-mode');
+            } else {
+                map.removeLayer(satLayer);
+                streetLayer.addTo(map);
+                sBtn.classList.add('active-mode');
+                satBtn.classList.remove('active-mode');
+            }
+        }
+
+        window.onload = init;
+    </script>
+</body>
+</html>
