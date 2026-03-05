@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>GoreBox 2D: Ultimate</title>
+    <style>
+        * { -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; outline: none; -webkit-tap-highlight-color: transparent; }
+        body { 
+            margin: 0; 
+            background: #87CEEB; 
+            overflow: hidden; font-family: 'monospace'; touch-action: none; 
+            transition: background 2s ease;
+        }
+        #hud { 
+            position: fixed; top: 10px; left: 10px; color: #fff; z-index: 10; 
+            background: rgba(0,0,0,0.6); padding: 12px; border-radius: 8px; border-left: 5px solid #ff3333;
+            pointer-events: none;
+        }
+        #controls { position: fixed; bottom: 30px; width: 100%; display: flex; justify-content: space-evenly; z-index: 100; }
+        .btn { 
+            background: rgba(255, 255, 255, 0.25); color: #fff; border: 2px solid #fff; 
+            width: 70px; height: 70px; border-radius: 50%; font-weight: bold; 
+            display: flex; align-items: center; justify-content: center; backdrop-filter: blur(5px);
+        }
+        #reset { 
+            position: fixed; top: 10px; right: 10px; background: #ff3333; 
+            color: #fff; border: none; padding: 12px 20px; border-radius: 8px; 
+            font-weight: bold; z-index: 100;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="hud">
+        <b>SKELETAL STATUS</b><br>
+        SPRAINS: <span id="s-count" style="color:#ffaa00">0</span><br>
+        BREAKS: <span id="b-count" style="color:#ff3333">0</span>
+    </div>
+
+    <button id="reset" onclick="init()">RESET</button>
+
+    <div id="controls">
+        <div class="btn" id="btn-l">LEFT</div>
+        <div class="btn" id="btn-up">FLING</div>
+        <div class="btn" id="btn-r">RIGHT</div>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/matter-js/0.19.0/matter.min.js"></script>
+
+    <script>
+        const { Engine, Render, Runner, Bodies, Composite, Constraint, Body, Vector, Events } = Matter;
+
+        const engine = Engine.create();
+        const world = engine.world;
+        const render = Render.create({
+            element: document.body, engine: engine,
+            options: { width: window.innerWidth, height: window.innerHeight, wireframes: false, background: 'transparent' }
+        });
+
+        Render.run(render);
+        Runner.run(Runner.create(), engine);
+
+        let player = { parts: [] }, spr=0, brk=0, lastX=0, gameTicks = 0;
+        const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+
+        const carColors = [
+            '#c0392b', '#2980b9', '#27ae60', '#f1c40f', '#8e44ad', 
+            '#d35400', '#2c3e50', '#7f8c8d', '#16a085', '#bdc3c7'
+        ];
+
+        function playCrunch() {
+            if (audioCtx.state === 'suspended') audioCtx.resume();
+            const osc = audioCtx.createOscillator();
+            const gain = audioCtx.createGain();
+            osc.type = Math.random() > 0.5 ? 'square' : 'sawtooth';
+            osc.frequency.setValueAtTime(35 + Math.random() * 90, audioCtx.currentTime);
+            gain.gain.setValueAtTime(0.07, audioCtx.currentTime);
+            gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.12);
+            osc.connect(gain); gain.connect(audioCtx.destination);
+            osc.start(); osc.stop(audioCtx.currentTime + 0.12);
+        }
+
+        function createChunk(x) {
+            const grass = Bodies.rectangle(x, window.innerHeight - 20, 1000, 40, { isStatic: true, friction: 1.2, render: { fillStyle: '#2d5a27' } });
+            Composite.add(world, grass);
+
+            const type = Math.random();
+            if (type < 0.25) {
+                // BUILDING WITH WINDOWS
+                const bX = x + 300;
+                Composite.add(world, Bodies.rectangle(bX, window.innerHeight - 200, 160, 320, { isStatic: true, render: { fillStyle: '#333' } }));
+                for(let r=0; r<4; r++) {
+                    for(let c=0; c<2; c++) {
+                        Composite.add(world, Bodies.rectangle(bX - 40 + (c*80), window.innerHeight - 340 + (r*60), 30, 30, { 
+                            isStatic: true, render: { fillStyle: Math.random() > 0.6 ? '#f1c40f' : '#1a1a1a' } 
+                        }));
+                    }
+                }
+            } else if (type < 0.5) {
+                // CAR (10 COLORS + DARK BLUE WINDOWS)
+                const cX = x + 300;
+                const col = carColors[Math.floor(Math.random() * carColors.length)];
+                const body = Bodies.rectangle(cX, window.innerHeight - 60, 130, 45, { isStatic: true, render: { fillStyle: col } });
+                const win = Bodies.rectangle(cX + 5, window.innerHeight - 85, 70, 20, { isStatic: true, render: { fillStyle: '#1a3a5a' } }); // Darker Blue
+                Composite.add(world, [body, win]);
+            } else if (type < 0.75) {
+                // TREES (BIG & MEDIUM)
+                const isBig = Math.random() > 0.5;
+                const tH = isBig ? 180 : 100;
+                const tW = isBig ? 25 : 15;
+                const trunk = Bodies.rectangle(x + 400, window.innerHeight - (tH/2) - 30, tW, tH, { isStatic: true, render: { fillStyle: '#4b3621' } });
+                const leaves = Bodies.circle(x + 400, window.innerHeight - tH - 40, isBig ? 60 : 35, { isStatic: true, render: { fillStyle: '#1e3d1a' } });
+                Composite.add(world, [trunk, leaves]);
+            } else {
+                // DUMPSTER
+                const dX = x + 400;
+                const box = Bodies.rectangle(dX, window.innerHeight - 60, 80, 50, { isStatic: true, render: { fillStyle: '#27ae60' } });
+                const lid = Bodies.rectangle(dX, window.innerHeight - 90, 85, 10, { isStatic: true, render: { fillStyle: '#111' } });
+                Composite.add(world, [box, lid]);
+            }
+        }
+
+        function spawnPlayer(x, y) {
+            const group = Body.nextGroup(true);
+            const p = [
+                Bodies.circle(x, y - 45, 12, { collisionFilter: { group: group }, render: { fillStyle: '#ffdbac' } }),
+                Bodies.rectangle(x, y, 25, 50, { collisionFilter: { group: group }, render: { fillStyle: '#333' } }),
+                Bodies.rectangle(x-18, y-10, 8, 30, { collisionFilter: { group: group }, render: { fillStyle: '#ffdbac' } }),
+                Bodies.rectangle(x+18, y-10, 8, 30, { collisionFilter: { group: group }, render: { fillStyle: '#ffdbac' } }),
+                Bodies.rectangle(x-8, y+45, 12, 40, { collisionFilter: { group: group }, render: { fillStyle: '#111' } }),
+                Bodies.rectangle(x+8, y+45, 12, 40, { collisionFilter: { group: group }, render: { fillStyle: '#111' } })
+            ];
+            p.forEach(part => part.lastInj = 0);
+            const joints = [
+                Constraint.create({ bodyA: p[1], bodyB: p[0], pointA: {x:0, y:-25}, pointB: {x:0, y:12}, stiffness: 0.6 }),
+                Constraint.create({ bodyA: p[1], bodyB: p[2], pointA: {x:-12, y:-20}, pointB: {x:0, y:-15}, stiffness: 0.4 }),
+                Constraint.create({ bodyA: p[1], bodyB: p[3], pointA: {x:12, y:-20}, pointB: {x:0, y:-15}, stiffness: 0.4 }),
+                Constraint.create({ bodyA: p[1], bodyB: p[4], pointA: {x:-8, y:25}, pointB: {x:0, y:-18}, stiffness: 0.3 }),
+                Constraint.create({ bodyA: p[1], bodyB: p[5], pointA: {x:8, y:25}, pointB: {x:0, y:-18}, stiffness: 0.3 })
+            ];
+            Composite.add(world, [...p, ...joints]);
+            return p;
+        }
+
+        function init() {
+            Composite.clear(world); spr=0; brk=0; lastX=0; gameTicks=0;
+            document.getElementById('s-count').innerText=0; document.getElementById('b-count').innerText=0;
+            for(let i=-1; i<4; i++) createChunk(i * 1000);
+            player.parts = spawnPlayer(200, 200);
+        }
+
+        Events.on(engine, 'collisionStart', (e) => {
+            const now = Date.now();
+            e.pairs.forEach(pair => {
+                const part = player.parts.find(p => p === pair.bodyA || p === pair.bodyB);
+                if(part) {
+                    // Bleed on every hit
+                    const b = Bodies.circle(part.position.x, part.position.y, 2, { render: { fillStyle: '#900' }, collisionFilter: { group: -1 } });
+                    Body.setVelocity(b, { x: (Math.random()-0.5)*4, y: -2 });
+                    Composite.add(world, b);
+                    setTimeout(() => Composite.remove(world, b), 800);
+                    
+                    // Controlled Injury Logic
+                    if(part.speed > 13 && now - part.lastInj > 650) {
+                        playCrunch();
+                        if(part.speed > 22) { brk++; part.render.fillStyle = '#f00'; }
+                        else { spr++; part.render.fillStyle = '#fa0'; }
+                        part.lastInj = now;
+                        document.getElementById('s-count').innerText = spr;
+                        document.getElementById('b-count').innerText = brk;
+                    }
+                }
+            });
+        });
+
+        Events.on(engine, 'afterUpdate', () => {
+            gameTicks++;
+            const cycle = (gameTicks % 3000) / 3000;
+            document.body.style.background = (cycle < 0.4 || cycle > 0.9) ? "#87CEEB" : (cycle < 0.6 ? "#ff7e5f" : "#1a1a2e");
+            if(!player.parts[1]) return;
+            const pos = player.parts[1].position;
+            Render.lookAt(render, { min: { x: pos.x - 450, y: 0 }, max: { x: pos.x + 450, y: window.innerHeight } });
+            if (pos.x > lastX + 600) { createChunk(pos.x + 1400); lastX = pos.x; }
+        });
+
+        const act = (x, y) => { if(player.parts[1]) Body.applyForce(player.parts[1], player.parts[1].position, {x, y}); };
+        document.getElementById('btn-l').ontouchstart = (e) => { e.preventDefault(); act(-0.04, 0); };
+        document.getElementById('btn-r').ontouchstart = (e) => { e.preventDefault(); act(0.04, 0); };
+        document.getElementById('btn-up').ontouchstart = (e) => { e.preventDefault(); act(0, -0.15); };
+
+        init();
+    </script>
+</body>
+</html>
