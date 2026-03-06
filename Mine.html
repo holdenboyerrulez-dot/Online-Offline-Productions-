@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>MC_World_Selector</title>
+    <style>
+        body { margin: 0; overflow: hidden; background: #000; touch-action: none; font-family: 'Courier New', monospace; }
+        #crosshair { position: fixed; top: 50%; left: 50%; width: 16px; height: 16px; border: 2px solid white; transform: translate(-50%, -50%); pointer-events: none; z-index: 10; display: none; }
+        
+        /* Menu Style */
+        #menu { 
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%; 
+            background: rgba(0,0,0,0.8); z-index: 1000; display: flex; 
+            flex-direction: column; align-items: center; justify-content: center; color: white; 
+        }
+        .menu-btn { 
+            width: 250px; padding: 15px; margin: 10px; background: #555; 
+            border: 3px solid #fff; color: white; font-size: 18px; text-align: center; 
+        }
+        .menu-btn:active { background: #888; }
+
+        /* UI Elements */
+        #ui-layer { position: fixed; top: 10px; left: 10px; color: white; text-shadow: 2px 2px #000; z-index: 100; pointer-events: none; font-size: 12px; display: none; }
+        #inventory { 
+            position: fixed; top: 10px; left: 50%; transform: translateX(-50%); 
+            display: none; background: rgba(0,0,0,0.7); padding: 5px; border: 2px solid #888; z-index: 101;
+        }
+        .slot { width: 40px; height: 40px; margin: 0 3px; border: 2px solid #555; display: flex; align-items: center; justify-content: center; color: white; font-size: 7px; text-align: center; }
+        .active { border-color: #fff; background: rgba(255,255,255,0.3); }
+
+        .btn { 
+            position: fixed; width: 75px; height: 75px; background: rgba(0,0,0,0.5); 
+            border: 3px solid white; border-radius: 50%; display: none; 
+            align-items: center; justify-content: center; z-index: 100; color: white; font-size: 32px; 
+        }
+        #mine-btn { bottom: 30px; right: 115px; }
+        #place-btn { bottom: 30px; right: 25px; }
+        #move-zone { position: fixed; bottom: 0; left: 0; width: 45%; height: 45%; z-index: 20; display: none; }
+        #look-zone { position: fixed; top: 0; left: 0; width: 100%; height: 100%; z-index: 5; display: none; }
+    </style>
+</head>
+<body>
+    <div id="menu">
+        <h1>MINECRAFT BETA</h1>
+        <p>Select World Type:</p>
+        <div class="menu-btn" onclick="startGame('flat')">FLAT WORLD</div>
+        <div class="menu-btn" onclick="startGame('forest')">FOREST WORLD</div>
+    </div>
+
+    <div id="ui-layer">FPS: <span id="fps">0</span><br>MC BETA 2026</div>
+    <div id="inventory">
+        <div id="slot-0" class="slot active">WOOD</div>
+        <div id="slot-1" class="slot">STONE</div>
+        <div id="slot-2" class="slot">GLASS</div>
+        <div id="slot-3" class="slot">BUSH</div>
+        <div id="slot-4" class="slot">DIRT</div>
+        <div id="slot-5" class="slot">GRASS</div>
+    </div>
+
+    <div id="crosshair"></div>
+    <div id="mine-btn" class="btn">⛏️</div>
+    <div id="place-btn" class="btn">🖱️</div>
+    <div id="move-zone"></div>
+    <div id="look-zone"></div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/nipplejs/0.9.0/nipplejs.min.js"></script>
+
+    <script>
+        let scene, camera, renderer, raycaster, manager;
+        let objects = [], moveData = { x: 0, y: 0 };
+        let velocityY = 0, selectedSlot = 0, lastTime = 0, frameCount = 0;
+        const gravity = 0.012, playerHeight = 1.7;
+
+        function createPixelTex(c1, c2) {
+            const canvas = document.createElement('canvas');
+            canvas.width = 16; canvas.height = 16;
+            const ctx = canvas.getContext('2d');
+            for(let x=0; x<16; x++) {
+                for(let y=0; y<16; y++) {
+                    ctx.fillStyle = Math.random() > 0.4 ? c1 : c2;
+                    ctx.fillRect(x, y, 1, 1);
+                }
+            }
+            const tex = new THREE.CanvasTexture(canvas);
+            tex.magFilter = tex.minFilter = THREE.NearestFilter;
+            return tex;
+        }
+
+        const texs = {
+            grass: createPixelTex('#59c037', '#48a02c'),
+            dirt: createPixelTex('#866043', '#664229'),
+            stone: createPixelTex('#808080', '#666666'),
+            wood: createPixelTex('#b38b5f', '#967249'),
+            leaf: createPixelTex('#348028', '#26601d'),
+            glass: createPixelTex('#aaddff', '#ffffff'),
+            bush: createPixelTex('#1a4d14', '#0f2e0b')
+        };
+
+        const invBlocks = [texs.wood, texs.stone, texs.glass, texs.bush, texs.dirt, texs.grass];
+
+        function startGame(type) {
+            document.getElementById('menu').style.display = 'none';
+            document.getElementById('ui-layer').style.display = 'block';
+            document.getElementById('inventory').style.display = 'flex';
+            document.getElementById('crosshair').style.display = 'block';
+            document.getElementById('mine-btn').style.display = 'flex';
+            document.getElementById('place-btn').style.display = 'flex';
+            document.getElementById('move-zone').style.display = 'block';
+            document.getElementById('look-zone').style.display = 'block';
+            
+            init(type);
+            setupControls();
+            animate();
+        }
+
+        function init(type) {
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x87CEEB);
+            scene.fog = new THREE.Fog(0x87CEEB, 1, 30);
+
+            camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+            camera.position.set(0, 5, 0);
+            camera.rotation.order = 'YXZ'; 
+
+            renderer = new THREE.WebGLRenderer({ antialias: false });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            document.body.appendChild(renderer.domElement);
+
+            raycaster = new THREE.Raycaster();
+            scene.add(new THREE.AmbientLight(0xffffff, 0.7));
+
+            const radius = 12;
+            for (let x = -radius; x < radius; x++) {
+                for (let z = -radius; z < radius; z++) {
+                    addBlock(x, 0, z, texs.grass);
+                    for (let y = -1; y > -25; y--) {
+                        if (y < -2 && Math.random() < 0.08) continue;
+                        addBlock(x, y, z, y > -4 ? texs.dirt : texs.stone);
+                    }
+                    if (type === 'forest' && Math.random() > 0.95 && (Math.abs(x) > 2 || Math.abs(z) > 2)) {
+                        spawnTree(x, 1, z);
+                    }
+                }
+            }
+
+            document.getElementById('mine-btn').addEventListener('touchstart', e => { e.preventDefault(); interact(true); });
+            document.getElementById('place-btn').addEventListener('touchstart', e => { e.preventDefault(); interact(false); });
+            
+            for(let i=0; i<6; i++) {
+                document.getElementById('slot-'+i).addEventListener('touchstart', () => {
+                    document.querySelector('.active').classList.remove('active');
+                    document.getElementById('slot-'+i).classList.add('active');
+                    selectedSlot = i;
+                });
+            }
+        }
+
+        function addBlock(x, y, z, tex) {
+            const mat = new THREE.MeshLambertMaterial({ map: tex, transparent: tex === texs.glass, opacity: tex === texs.glass ? 0.5 : 1 });
+            const block = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), mat);
+            block.position.set(x, y, z);
+            scene.add(block);
+            objects.push(block);
+        }
+
+        function spawnTree(x, y, z) {
+            const h = 3 + Math.floor(Math.random() * 2);
+            for(let i=0; i<h; i++) addBlock(x, y+i, z, texs.wood);
+            for(let ix=-1; ix<=1; ix++) for(let iy=h; iy<=h+1; iy++) for(let iz=-1; iz<=1; iz++) addBlock(x+ix, y+iy, z+iz, texs.leaf);
+        }
+
+        function interact(isMining) {
+            raycaster.setFromCamera(new THREE.Vector2(0,0), camera);
+            const hits = raycaster.intersectObjects(objects);
+            if (hits.length > 0 && hits[0].distance < 6) {
+                if (isMining) {
+                    scene.remove(hits[0].object);
+                    objects = objects.filter(o => o !== hits[0].object);
+                } else {
+                    const pos = hits[0].object.position.clone().add(hits[0].face.normal);
+                    addBlock(pos.x, pos.y, pos.z, invBlocks[selectedSlot]);
+                }
+            }
+        }
+
+        function setupControls() {
+            manager = nipplejs.create({ zone: document.getElementById('move-zone'), mode: 'static', position: { left: '80px', bottom: '80px' }, color: 'white' });
+            manager.on('move', (e, d) => { moveData.x = d.vector.x; moveData.y = d.vector.y; });
+            manager.on('end', () => { moveData = { x: 0, y: 0 }; });
+
+            let lastX, lastY;
+            document.getElementById('look-zone').addEventListener('touchstart', e => { lastX = e.touches[0].clientX; lastY = e.touches[0].clientY; });
+            document.getElementById('look-zone').addEventListener('touchmove', e => {
+                camera.rotation.y -= (e.touches[0].clientX - lastX) * 0.007;
+                camera.rotation.x -= (e.touches[0].clientY - lastY) * 0.007;
+                camera.rotation.x = Math.max(-1.5, Math.min(1.5, camera.rotation.x));
+                lastX = e.touches[0].clientX; lastY = e.touches[0].clientY;
+            });
+        }
+
+        function animate(time) {
+            requestAnimationFrame(animate);
+            frameCount++;
+            if (time > lastTime + 1000) { document.getElementById('fps').innerText = frameCount; frameCount = 0; lastTime = time; }
+            velocityY -= gravity;
+            camera.position.y += velocityY;
+            if (camera.position.y < -30) { camera.position.set(0, 5, 0); velocityY = 0; }
+            const downRay = new THREE.Raycaster(camera.position, new THREE.Vector3(0, -1, 0));
+            const intersect = downRay.intersectObjects(objects);
+            if (intersect.length > 0 && intersect[0].distance < playerHeight) {
+                camera.position.y = intersect[0].object.position.y + 0.5 + playerHeight;
+                velocityY = 0;
+            }
+            const speed = 0.13;
+            camera.position.x += (Math.cos(camera.rotation.y) * moveData.x - Math.sin(camera.rotation.y) * moveData.y) * speed;
+            camera.position.z += (-Math.sin(camera.rotation.y) * moveData.x - Math.cos(camera.rotation.y) * moveData.y) * speed;
+            renderer.render(scene, camera);
+        }
+    </script>
+</body>
+</html>
